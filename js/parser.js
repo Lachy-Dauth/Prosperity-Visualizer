@@ -193,33 +193,54 @@ export function buildStrategy(rawFile, rows, meta) {
     s.books[i] = { bids: r.bids, asks: r.asks };
   }
 
-  // Day inference for trades: walk in file order, bump to next available
-  // day on a strict drop of trade.timestamp.
-  const uniqueDays = [];
-  for (let i = 0; i < days.length; i++) {
-    if (i === 0 || days[i] !== days[i - 1]) uniqueDays.push(days[i]);
-  }
+  // Align each trade to the activity tick with the matching raw
+  // timestamp by walking forward through the tick array. This works
+  // for logs whose first activity day contains no trades (where the
+  // old "advance-on-timestamp-drop" heuristic anchored every trade to
+  // the wrong day) and for logs that don't start on day 0.
   const rawTrades = rawFile.tradeHistory ?? [];
-  const tradeDays = new Array(rawTrades.length).fill(uniqueDays[0] ?? 0);
-  let curDay = 0;
-  let prevTs = -Infinity;
-  for (let i = 0; i < rawTrades.length; i++) {
-    const t = rawTrades[i];
-    if (t.timestamp < prevTs && curDay + 1 < uniqueDays.length) curDay++;
-    tradeDays[i] = uniqueDays[curDay] ?? 0;
-    prevTs = t.timestamp;
+  const tradeDays = new Array(rawTrades.length).fill(days[0] ?? 0);
+  const tradeTickKeys = new Array(rawTrades.length).fill(0);
+  const ticksByRawTs = new Map();
+  for (let i = 0; i < rawTimestamps.length; i++) {
+    const rt = rawTimestamps[i];
+    const list = ticksByRawTs.get(rt);
+    if (list) list.push(i);
+    else ticksByRawTs.set(rt, [i]);
+  }
+  {
+    let pos = 0;
+    for (let i = 0; i < rawTrades.length; i++) {
+      const t = rawTrades[i];
+      const candidates = ticksByRawTs.get(t.timestamp);
+      let found = -1;
+      if (candidates) {
+        // Pick the first candidate tick at or after the running cursor;
+        // falls back to the latest earlier candidate if we're already past
+        // the last matching tick for this timestamp.
+        for (const ti of candidates) {
+          if (ti >= pos) {
+            found = ti;
+            break;
+          }
+        }
+        if (found < 0) found = candidates[candidates.length - 1];
+      }
+      if (found < 0) {
+        found = Math.max(0, Math.min(pos, timestamps.length - 1));
+      }
+      tradeDays[i] = days[found] ?? 0;
+      tradeTickKeys[i] = timestamps[found] ?? tickKeyOf(tradeDays[i], t.timestamp);
+      pos = found;
+    }
   }
   const tradeOrder = rawTrades
     .map((_, i) => i)
-    .sort((a, b) => {
-      const ka = tickKeyOf(tradeDays[a], rawTrades[a].timestamp);
-      const kb = tickKeyOf(tradeDays[b], rawTrades[b].timestamp);
-      return ka - kb || a - b;
-    });
+    .sort((a, b) => tradeTickKeys[a] - tradeTickKeys[b] || a - b);
   const tradesSorted = tradeOrder.map((i) => ({
     ...rawTrades[i],
     day: tradeDays[i],
-    tickKey: tickKeyOf(tradeDays[i], rawTrades[i].timestamp),
+    tickKey: tradeTickKeys[i],
   }));
   const tradeDaysSorted = tradeOrder.map((i) => tradeDays[i]);
 
