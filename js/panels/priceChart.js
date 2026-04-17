@@ -200,9 +200,10 @@ export function mountPriceChart({
     if (state.prefs.priceBots)
       markers.push({
         name: "Bot trades",
-        color: "#a1a1aa",
+        color: "#d4d4d8",
+        outline: "#18181b",
         shape: "dot",
-        size: 5,
+        size: 11,
         xs: botXs,
         ys: botYs,
       });
