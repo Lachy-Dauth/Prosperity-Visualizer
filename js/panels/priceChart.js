@@ -160,12 +160,26 @@ export function mountPriceChart({
     const ownSellsYs = [];
     const botXs = [];
     const botYs = [];
+    // --- TEMP DIAG ---
+    let diagFirstTrade = null;
+    let diagTickKeyMissing = 0;
+    // -----------------
     for (const t of ref.trades) {
       if (t.symbol !== product) continue;
       // Line series plot against tickKey (day * DAY_STRIDE + ts), so
       // trade markers must use the same axis or multi-day logs collapse
       // every marker into the first day's x range.
       const x = t.tickKey ?? t.timestamp;
+      if (t.tickKey == null) diagTickKeyMissing++;
+      if (!diagFirstTrade) {
+        diagFirstTrade = {
+          symbol: t.symbol,
+          timestamp: t.timestamp,
+          day: t.day,
+          tickKey: t.tickKey,
+          computedX: x,
+        };
+      }
       const isBuy = t.buyer === "SUBMISSION";
       const isSell = t.seller === "SUBMISSION";
       if (isBuy) {
@@ -179,6 +193,32 @@ export function mountPriceChart({
         botYs.push(t.price);
       }
     }
+    // --- TEMP DIAG ---
+    const lineXs = ps.timestamps;
+    console.log("[priceChart DIAG]", {
+      product,
+      totalTrades: ref.trades.length,
+      productTrades: ownBuysXs.length + ownSellsXs.length + botXs.length,
+      tickKeyMissingCount: diagTickKeyMissing,
+      firstTrade: diagFirstTrade,
+      lineXRange: lineXs.length
+        ? { first: lineXs[0], last: lineXs[lineXs.length - 1] }
+        : null,
+      markerXRange: {
+        buys: ownBuysXs.length
+          ? { min: Math.min(...ownBuysXs), max: Math.max(...ownBuysXs) }
+          : null,
+        sells: ownSellsXs.length
+          ? { min: Math.min(...ownSellsXs), max: Math.max(...ownSellsXs) }
+          : null,
+        bots: botXs.length
+          ? { min: Math.min(...botXs), max: Math.max(...botXs) }
+          : null,
+      },
+      firstFewDays: ref.days?.slice?.(0, 5),
+      firstFewRawTs: ref.rawTimestamps?.slice?.(0, 5),
+    });
+    // -----------------
     // Own trades get a fat, high-contrast style so they jump out of
     // the noisy line series: larger shape, dark outline, bright fill.
     if (state.prefs.priceBuys)
