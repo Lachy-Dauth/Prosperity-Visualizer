@@ -54,9 +54,6 @@ export interface AppState {
   tickIdx: number;
   /** active product filter — null means "all" */
   selectedProduct: string | null;
-  /** day filter — null means "all" */
-  selectedDay: number | null;
-  showBlanks: boolean;
   isPlaying: boolean;
   playSpeed: number; // ticks per second
   prefs: UiPrefs;
@@ -72,8 +69,6 @@ export interface AppState {
   setTickIdx: (i: number) => void;
   stepTick: (delta: number) => void;
   setSelectedProduct: (p: string | null) => void;
-  setSelectedDay: (d: number | null) => void;
-  setShowBlanks: (b: boolean) => void;
   setIsPlaying: (b: boolean) => void;
   setPlaySpeed: (n: number) => void;
   setPrefs: (p: Partial<UiPrefs>) => void;
@@ -89,8 +84,6 @@ export const useStore = create<AppState>((set, get) => ({
   comparingIds: new Set(),
   tickIdx: 0,
   selectedProduct: null,
-  selectedDay: null,
-  showBlanks: true,
   isPlaying: false,
   playSpeed: 5,
   prefs: loadPrefs(),
@@ -174,8 +167,6 @@ export const useStore = create<AppState>((set, get) => ({
   stepTick: (delta) => get().setTickIdx(get().tickIdx + delta),
 
   setSelectedProduct: (p) => set({ selectedProduct: p }),
-  setSelectedDay: (d) => set({ selectedDay: d }),
-  setShowBlanks: (b) => set({ showBlanks: b }),
   setIsPlaying: (b) => set({ isPlaying: b }),
   setPlaySpeed: (n) => set({ playSpeed: n }),
 

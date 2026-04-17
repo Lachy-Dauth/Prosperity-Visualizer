@@ -1,13 +1,19 @@
-import type {
-  DecodedLambdaLog,
-  OwnFill,
-  ParsedStrategy,
-  ProductSeries,
-  ProductTickRow,
-  RawLogFile,
-  SummaryMetrics,
+import {
+  DAY_STRIDE,
+  type DecodedLambdaLog,
+  type OwnFill,
+  type ParsedStrategy,
+  type ProductSeries,
+  type ProductTickRow,
+  type RawLogFile,
+  type SummaryMetrics,
 } from "../types";
 import { buildLimits } from "./positionLimits";
+
+/** day * DAY_STRIDE + ts — the unique tick identity. */
+function tickKeyOf(day: number, ts: number): number {
+  return (Number.isFinite(day) ? day : 0) * DAY_STRIDE + ts;
+}
 
 /**
  * Parse the activitiesLog CSV (semicolon-delimited, well-defined header).
@@ -91,26 +97,41 @@ function totalVol(levels: { price: number; volume: number }[]): number {
 /**
  * Build per-product time series, position trace, and summary metrics from
  * the raw rows + trades.
+ *
+ * Supports multi-day logs where raw timestamps reset to 0 at each day
+ * boundary by keying ticks on `day * DAY_STRIDE + timestamp` internally.
  */
 export function buildStrategy(
   rawFile: RawLogFile,
   rows: ProductTickRow[],
   meta: { id: string; name: string; color: string; filename?: string }
 ): ParsedStrategy {
-  // sort rows by timestamp ascending (already sorted in IMC output but be safe)
-  rows.sort((a, b) => a.timestamp - b.timestamp || a.product.localeCompare(b.product));
+  // Preserve row order within a (day, ts) so products from the same tick
+  // land on the same index. Sort by composite key, then product.
+  rows.sort(
+    (a, b) =>
+      tickKeyOf(a.day, a.timestamp) - tickKeyOf(b.day, b.timestamp) ||
+      a.product.localeCompare(b.product)
+  );
 
-  // Build sorted unique timestamp list and product list
-  const tsSet = new Set<number>();
+  // Build sorted unique tick-key list and parallel day/rawTs arrays.
+  const tIndex = new Map<number, number>();
+  const timestamps: number[] = []; // composite tick keys
+  const rawTimestamps: number[] = [];
+  const days: number[] = [];
   const productSet = new Set<string>();
   for (const r of rows) {
-    tsSet.add(r.timestamp);
     if (r.product) productSet.add(r.product);
+    if (!Number.isFinite(r.timestamp)) continue;
+    const key = tickKeyOf(r.day, r.timestamp);
+    if (!tIndex.has(key)) {
+      tIndex.set(key, timestamps.length);
+      timestamps.push(key);
+      rawTimestamps.push(r.timestamp);
+      days.push(Number.isFinite(r.day) ? r.day : 0);
+    }
   }
-  const timestamps = Array.from(tsSet).sort((a, b) => a - b);
   const products = Array.from(productSet).sort();
-  const tIndex = new Map<number, number>();
-  timestamps.forEach((t, i) => tIndex.set(t, i));
 
   // Initialize per-product series
   const series: Record<string, ProductSeries> = {};
@@ -130,7 +151,7 @@ export function buildStrategy(
       position: new Array(timestamps.length).fill(0),
       cumOwnVolume: new Array(timestamps.length).fill(0),
       books: timestamps.map(() => ({ bids: [], asks: [] })),
-      ownFillIndices: timestamps.map(() => ({ start: 0, count: 0 })),
+      ownFillIndices: timestamps.map(() => [] as number[]),
     };
   }
 
@@ -138,7 +159,7 @@ export function buildStrategy(
   for (const r of rows) {
     const s = series[r.product];
     if (!s) continue;
-    const i = tIndex.get(r.timestamp);
+    const i = tIndex.get(tickKeyOf(r.day, r.timestamp));
     if (i === undefined) continue;
     s.bestBid[i] = r.bids[0]?.price ?? NaN;
     s.bestAsk[i] = r.asks[0]?.price ?? NaN;
@@ -167,27 +188,58 @@ export function buildStrategy(
     }
   }
 
-  // Trades (sorted by timestamp ascending; stable-sort preserves original order)
-  const tradesSorted = [...rawFile.tradeHistory].sort(
-    (a, b) => a.timestamp - b.timestamp
+  // Trades in rawFile.tradeHistory only carry raw `timestamp` (no day),
+  // so we infer the day by walking them in file order. As long as trade
+  // timestamps are non-decreasing, we're on the same day; when we see a
+  // strict drop we cross into the next available day in the tick axis.
+  // Trades with timestamps that don't correspond to any tick still get
+  // a plausible day from the last known position.
+  const uniqueDays: number[] = [];
+  for (let i = 0; i < days.length; i++) {
+    if (i === 0 || days[i] !== days[i - 1]) uniqueDays.push(days[i]);
+  }
+  const rawTrades = rawFile.tradeHistory ?? [];
+  const tradeDays: number[] = new Array(rawTrades.length).fill(
+    uniqueDays[0] ?? 0
   );
+  let currentDayIdx = 0;
+  let prevTs = -Infinity;
+  for (let i = 0; i < rawTrades.length; i++) {
+    const t = rawTrades[i];
+    if (
+      t.timestamp < prevTs &&
+      currentDayIdx + 1 < uniqueDays.length
+    ) {
+      currentDayIdx++;
+    }
+    tradeDays[i] = uniqueDays[currentDayIdx] ?? 0;
+    prevTs = t.timestamp;
+  }
+  // Now produce a stable chronological order (composite key), preserving
+  // the original order on ties.
+  const tradeOrder = rawTrades
+    .map((_, i) => i)
+    .sort((a, b) => {
+      const ka = tickKeyOf(tradeDays[a], rawTrades[a].timestamp);
+      const kb = tickKeyOf(tradeDays[b], rawTrades[b].timestamp);
+      return ka - kb || a - b;
+    });
+  const tradesSorted = tradeOrder.map((i) => rawTrades[i]);
+  const tradeDaysSorted = tradeOrder.map((i) => tradeDays[i]);
 
-  // Walk trades to compute position per tick and own fills
-  const positions: Record<string, number> = {};
-  const cumOwnVol: Record<string, number> = {};
+  // Walk trades to collect own fills with composite keys
   const ownFills: OwnFill[] = [];
-  // group fills by tick index for ownFillIndices
-  const fillsByTickIdx: Record<string, number[]> = {};
+  const fillsByTickIdxPerProduct: Record<string, Record<number, number[]>> = {};
 
-  for (const t of tradesSorted) {
+  for (let k = 0; k < tradesSorted.length; k++) {
+    const t = tradesSorted[k];
+    const day = tradeDaysSorted[k];
     const isBuy = t.buyer === "SUBMISSION";
     const isSell = t.seller === "SUBMISSION";
     if (!isBuy && !isSell) continue;
     const sym = t.symbol;
     if (!series[sym]) continue;
     const sign = isBuy ? 1 : -1;
-    positions[sym] = (positions[sym] ?? 0) + sign * t.quantity;
-    cumOwnVol[sym] = (cumOwnVol[sym] ?? 0) + t.quantity;
     const cashFlow = -sign * t.price * t.quantity;
     const fill: OwnFill = {
       timestamp: t.timestamp,
@@ -199,27 +251,28 @@ export function buildStrategy(
     };
     const idx = ownFills.length;
     ownFills.push(fill);
-    // align fill to tick index — find smallest timestamp >= t.timestamp
-    let ti = tIndex.get(t.timestamp);
+    const key = tickKeyOf(day, t.timestamp);
+    let ti = tIndex.get(key);
     if (ti === undefined) {
-      // find nearest by binary search
-      ti = lowerBound(timestamps, t.timestamp);
+      ti = lowerBound(timestamps, key);
       if (ti >= timestamps.length) ti = timestamps.length - 1;
     }
-    const key = `${sym}:${ti}`;
-    if (!fillsByTickIdx[key]) fillsByTickIdx[key] = [];
-    fillsByTickIdx[key].push(idx);
+    if (!fillsByTickIdxPerProduct[sym]) fillsByTickIdxPerProduct[sym] = {};
+    const map = fillsByTickIdxPerProduct[sym];
+    if (!map[ti]) map[ti] = [];
+    map[ti].push(idx);
   }
 
-  // Now walk every tick and snapshot the running position into each product's series
-  // We need to do an in-order walk over the trades again (or interleave) to update positions tick-by-tick.
+  // Now walk every tick and snapshot running position and cumulative vol.
   const tickPos: Record<string, number> = {};
   const tickCumVol: Record<string, number> = {};
-  let tradePtr = 0;
+  let walkPtr = 0;
   for (let i = 0; i < timestamps.length; i++) {
-    const t = timestamps[i];
-    while (tradePtr < tradesSorted.length && tradesSorted[tradePtr].timestamp <= t) {
-      const tr = tradesSorted[tradePtr];
+    const upper = timestamps[i];
+    while (walkPtr < tradesSorted.length) {
+      const tr = tradesSorted[walkPtr];
+      const trKey = tickKeyOf(tradeDaysSorted[walkPtr], tr.timestamp);
+      if (trKey > upper) break;
       const isBuy = tr.buyer === "SUBMISSION";
       const isSell = tr.seller === "SUBMISSION";
       if ((isBuy || isSell) && series[tr.symbol]) {
@@ -227,7 +280,7 @@ export function buildStrategy(
         tickPos[tr.symbol] = (tickPos[tr.symbol] ?? 0) + sign * tr.quantity;
         tickCumVol[tr.symbol] = (tickCumVol[tr.symbol] ?? 0) + tr.quantity;
       }
-      tradePtr++;
+      walkPtr++;
     }
     for (const p of products) {
       series[p].position[i] = tickPos[p] ?? 0;
@@ -235,15 +288,16 @@ export function buildStrategy(
     }
   }
 
-  // Wire up ownFillIndices per (product, tick): contiguous fills in ownFills aren't
-  // grouped by product, so we store per (product, tick) the count and a synthetic
-  // "start" of -1 with count of how many fills (the consumer can filter ownFills).
-  for (const [key, idxs] of Object.entries(fillsByTickIdx)) {
-    const [prod, tiStr] = key.split(":");
-    const ti = Number(tiStr);
+  // Attach explicit index lists per (product, tick). Fills for a single
+  // (product, tick) are NOT guaranteed to be contiguous in ownFills
+  // because multiple products can trade at the same timestamp, so we
+  // store the full list of indices rather than a start/count range.
+  for (const [prod, map] of Object.entries(fillsByTickIdxPerProduct)) {
     const s = series[prod];
     if (!s) continue;
-    s.ownFillIndices[ti] = { start: idxs[0], count: idxs.length };
+    for (const [tiStr, idxs] of Object.entries(map)) {
+      s.ownFillIndices[Number(tiStr)] = idxs;
+    }
   }
 
   // Total PnL is sum of per-product cumulative PnL at each tick (forward-fill NaNs as 0 for sum)
@@ -258,12 +312,17 @@ export function buildStrategy(
     }
   }
 
-  // Build per-tick log index (logs are 1 entry per tick keyed by timestamp)
+  // Build per-tick-key log index. rawFile.logs entries only carry a raw
+  // `timestamp` (no day), so we align them to ticks by file order under
+  // the assumption logs are emitted one-per-tick chronologically — which
+  // is how IMC's sandbox emits them. If the lengths disagree, extra logs
+  // are ignored and missing logs leave the bucket empty.
   const logIndexByTick: Record<number, { start: number; count: number }> = {};
-  for (let i = 0; i < rawFile.logs.length; i++) {
-    const ts = rawFile.logs[i].timestamp;
-    if (!logIndexByTick[ts]) logIndexByTick[ts] = { start: i, count: 0 };
-    logIndexByTick[ts].count++;
+  const logCount = Math.min(rawFile.logs.length, timestamps.length);
+  for (let i = 0; i < logCount; i++) {
+    const key = timestamps[i];
+    if (!logIndexByTick[key]) logIndexByTick[key] = { start: i, count: 0 };
+    logIndexByTick[key].count++;
   }
 
   const summary = computeSummary(totalPnl, series, ownFills, products);
@@ -275,6 +334,8 @@ export function buildStrategy(
     color: meta.color,
     filename: meta.filename,
     timestamps,
+    rawTimestamps,
+    days,
     products,
     series,
     totalPnl,

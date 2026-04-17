@@ -24,7 +24,6 @@ const DEFAULT_LAYOUT: Layout[] = [
   { i: "position", x: 0, y: 17, w: 6, h: 6, minH: 4, minW: 3 },
   { i: "fills", x: 6, y: 17, w: 3, h: 6, minH: 4, minW: 3 },
   { i: "logs", x: 9, y: 17, w: 3, h: 6, minH: 4, minW: 3 },
-  { i: "pressure2", x: 10, y: 13, w: 2, h: 4, minH: 2, minW: 2, static: true },
 ];
 
 // Map panel id → component
@@ -65,7 +64,7 @@ export function Dashboard() {
     const present = new Set(loaded.map((l) => l.i));
     const merged = [...loaded];
     for (const def of DEFAULT_LAYOUT) {
-      if (!present.has(def.i) && def.i !== "pressure2") merged.push(def);
+      if (!present.has(def.i)) merged.push(def);
     }
     return merged.filter((l) => l.i in PANELS);
   }, []);

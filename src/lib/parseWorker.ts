@@ -2,7 +2,6 @@
 import type { ParsedStrategy, RawLogFile } from "../types";
 import { buildStrategy, parseActivitiesCsv } from "./parser";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 type ParseRequest = {
   type: "parse";
   reqId: number;
@@ -20,7 +19,9 @@ type ProgressMsg = {
 type DoneMsg = { type: "done"; reqId: number; strategy: ParsedStrategy };
 type ErrMsg = { type: "error"; reqId: number; error: string };
 
-const ctx: Worker = self as unknown as Worker;
+// In a dedicated worker, `self` is the worker's global scope, not a Worker
+// instance (postMessage is there, terminate() is not).
+const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
 ctx.addEventListener("message", (ev: MessageEvent<ParseRequest>) => {
   const msg = ev.data;

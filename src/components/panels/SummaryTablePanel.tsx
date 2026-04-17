@@ -109,7 +109,10 @@ export function SummaryTablePanel() {
           <tbody>
             {sorted.length === 0 ? (
               <tr>
-                <td colSpan={9} className="p-4 text-center text-zinc-500">
+                <td
+                  colSpan={8 + products.length}
+                  className="p-4 text-center text-zinc-500"
+                >
                   Load logs to compare.
                 </td>
               </tr>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useStore, getReferenceStrategy } from "../lib/store";
 import {
   InfoIcon,
@@ -27,31 +27,15 @@ export function TopBar({ onShowAbout }: Props) {
   const setPlaySpeed = useStore((s) => s.setPlaySpeed);
   const selectedProduct = useStore((s) => s.selectedProduct);
   const setSelectedProduct = useStore((s) => s.setSelectedProduct);
-  const selectedDay = useStore((s) => s.selectedDay);
-  const setSelectedDay = useStore((s) => s.setSelectedDay);
-  const showBlanks = useStore((s) => s.showBlanks);
-  const setShowBlanks = useStore((s) => s.setShowBlanks);
   const prefs = useStore((s) => s.prefs);
   const setPrefs = useStore((s) => s.setPrefs);
 
   const max = ref ? ref.timestamps.length - 1 : 0;
-  const ts = ref?.timestamps[tickIdx] ?? 0;
-
-  // Derive day list from reference strategy by reading day from each tick row.
-  // We don't have day per timestamp directly — but timestamps reset at day
-  // boundaries in IMC's combined logs. We compute days from the gap pattern.
-  const days = useMemo(() => {
-    if (!ref) return [] as number[];
-    // Heuristic: ticks always increase by 100. A drop = day boundary. Day 0
-    // for first segment unless we can infer otherwise. Most submissions are
-    // single-day so this returns [].
-    const out: number[] = [];
-    for (let i = 1; i < ref.timestamps.length; i++) {
-      if (ref.timestamps[i] < ref.timestamps[i - 1]) out.push(i);
-    }
-    if (out.length === 0) return [];
-    return Array.from({ length: out.length + 1 }, (_, i) => i);
-  }, [ref]);
+  const tickDay = ref?.days?.[tickIdx];
+  const tickTs = ref?.rawTimestamps?.[tickIdx] ?? ref?.timestamps?.[tickIdx] ?? 0;
+  const hasMultipleDays = ref
+    ? ref.days && ref.days.length > 0 && ref.days[0] !== ref.days[ref.days.length - 1]
+    : false;
 
   // Playback loop
   const rafRef = useRef<number | null>(null);
@@ -161,8 +145,14 @@ export function TopBar({ onShowAbout }: Props) {
           />
           <div className="num shrink-0 whitespace-nowrap text-[11px] text-zinc-300">
             Tick <span className="text-zinc-100">{tickIdx}</span> /{" "}
-            <span className="text-zinc-500">{max}</span> · TS{" "}
-            <span className="text-zinc-100">{ts.toLocaleString()}</span>
+            <span className="text-zinc-500">{max}</span> ·{" "}
+            {hasMultipleDays && tickDay !== undefined && (
+              <>
+                <span className="text-zinc-100">D{tickDay}</span>{" "}
+              </>
+            )}
+            TS{" "}
+            <span className="text-zinc-100">{tickTs.toLocaleString()}</span>
           </div>
         </div>
 
@@ -199,31 +189,6 @@ export function TopBar({ onShowAbout }: Props) {
             </option>
           ))}
         </select>
-        {days.length > 0 && (
-          <select
-            className="input !w-auto !py-0.5"
-            value={selectedDay ?? ""}
-            onChange={(e) =>
-              setSelectedDay(e.target.value === "" ? null : Number(e.target.value))
-            }
-          >
-            <option value="">All days</option>
-            {days.map((d) => (
-              <option key={d} value={d}>
-                Day {d}
-              </option>
-            ))}
-          </select>
-        )}
-        <label className="inline-flex cursor-pointer items-center gap-1 text-zinc-400">
-          <input
-            type="checkbox"
-            checked={showBlanks}
-            onChange={(e) => setShowBlanks(e.target.checked)}
-            className="h-3 w-3 accent-accent-500"
-          />
-          Show empty-book ticks
-        </label>
         <span className="ml-auto inline-flex items-center gap-1 rounded border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-500">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
           Local-only · No uploads

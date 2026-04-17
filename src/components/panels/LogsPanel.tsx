@@ -50,7 +50,7 @@ export function LogsPanel() {
           ))}
         </div>
         <span className="num normal-case tracking-normal text-zinc-500">
-          TS {ref.timestamps[tickIdx]?.toLocaleString()}
+          TS {ref.rawTimestamps[tickIdx]?.toLocaleString()}
         </span>
       </div>
       <div className="flex-1 overflow-auto p-2">

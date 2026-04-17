@@ -23,7 +23,6 @@ export function lttb(
   for (let i = 0; i < targetPoints - 2; i++) {
     const rangeStart = Math.floor((i + 1) * bucketSize) + 1;
     const rangeEnd = Math.min(Math.floor((i + 2) * bucketSize) + 1, n);
-    const rangeLen = rangeEnd - rangeStart;
     let avgX = 0;
     let avgY = 0;
     let avgN = 0;
@@ -59,7 +58,6 @@ export function lttb(
         maxArea = area;
         nextA = j;
       }
-      void rangeLen;
     }
     sampledX[i + 1] = xs[nextA];
     sampledY[i + 1] = ys[nextA];

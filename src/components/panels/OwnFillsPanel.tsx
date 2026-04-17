@@ -10,13 +10,13 @@ export function OwnFillsPanel() {
 
   const filtered: OwnFill[] = useMemo(() => {
     if (!ref) return [];
-    const ts = ref.timestamps[tickIdx] ?? 0;
+    const rawTs = ref.rawTimestamps[tickIdx] ?? 0;
     let out = ref.ownFills;
     if (selectedProduct) out = out.filter((f) => f.product === selectedProduct);
     if (!showAll) {
-      // ±5 tick window around current ts (each tick = 100)
-      const lo = ts - 500;
-      const hi = ts + 500;
+      // ±5 tick window around current raw timestamp (each tick = 100)
+      const lo = rawTs - 500;
+      const hi = rawTs + 500;
       out = out.filter((f) => f.timestamp >= lo && f.timestamp <= hi);
     }
     return out;

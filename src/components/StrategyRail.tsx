@@ -36,18 +36,23 @@ export function StrategyRail({ collapsed, onToggle, onShowAbout }: Props) {
 
   async function handleFiles(files: FileList | File[]) {
     const arr = Array.from(files);
+    // Track colors picked within this batch so parallel/sequential picks
+    // don't all return the same first-unused palette entry.
+    const batchColors = [...usedColors];
     for (const f of arr) {
       const id = uid();
       try {
         setParseProgress({ id, pct: 0, message: `Reading ${f.name}…` });
         const text = await f.text();
         setParseProgress({ id, pct: 5, message: `Parsing ${f.name}…` });
+        const color = pickColor(batchColors);
+        batchColors.push(color);
         const strat = await parseLogText(
           text,
           {
             id,
             name: f.name.replace(/\.(log|json)$/i, ""),
-            color: pickColor([...usedColors, ...arr.slice(0, arr.indexOf(f)).map(() => "")]),
+            color,
             filename: f.name,
           },
           {
