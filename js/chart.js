@@ -345,10 +345,10 @@ export function createChart(canvas, opts = {}) {
       const len = Math.min(xs.length, ys.length);
       for (let i = 0; i < len; i++) {
         const y = ys[i];
-        if (!Number.isFinite(y)) {
-          penDown = false;
-          continue;
-        }
+        // Skip NaN points without lifting the pen — joins the line
+        // across gaps so you see continuous series instead of
+        // hundreds of short segments when a level disappears briefly.
+        if (!Number.isFinite(y)) continue;
         const X = px(xs[i]);
         const Y = py(y);
         if (!penDown) {
