@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef } from "react";
+import type uPlot from "uplot";
 import type { AlignedData, Options } from "uplot";
 import { useStore } from "../../lib/store";
 import { lttb } from "../../lib/downsample";
 import { downloadCanvasPng } from "../../lib/exporters";
-import { UPlotChart, type UPlotChartHandle } from "../UPlotChart";
+import { UPlotChart, syncPlotCursorToX } from "../UPlotChart";
 import { DownloadIcon } from "../Icons";
 
 const TARGET_POINTS = 1500;
@@ -18,7 +19,7 @@ export function PnlChartPanel() {
 
   const refStrat = strategies.find((s) => s.id === referenceId) ?? null;
 
-  const handleRef = useRef<UPlotChartHandle>(null);
+  const handleRef = useRef<uPlot | null>(null);
 
   const { data, options } = useMemo(() => {
     if (!refStrat) {
@@ -125,7 +126,8 @@ export function PnlChartPanel() {
         ? tickIdx / (refStrat.timestamps.length - 1)
         : 0
       : refStrat.timestamps[tickIdx] ?? 0;
-    handleRef.current?.syncCursorToX(target);
+    handleRef.current &&
+      syncPlotCursorToX(handleRef.current, target);
   }, [tickIdx, refStrat, prefs.normalizedX]);
 
   return (
@@ -164,7 +166,7 @@ export function PnlChartPanel() {
             className="btn !px-1.5 !py-0.5"
             title="Export PNG"
             onClick={() => {
-              const u = handleRef.current?.getPlot();
+              const u = handleRef.current;
               if (!u) return;
               const c = (u.root as HTMLElement).querySelector("canvas");
               if (c instanceof HTMLCanvasElement) {
@@ -177,7 +179,7 @@ export function PnlChartPanel() {
         </div>
       </div>
       <div className="relative flex-1">
-        <UPlotChart ref={handleRef} data={data} options={options} />
+        <UPlotChart plotRef={handleRef} data={data} options={options} />
       </div>
     </div>
   );

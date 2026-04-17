@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef } from "react";
+import type uPlot from "uplot";
 import type { AlignedData, Options } from "uplot";
 import { useStore } from "../../lib/store";
 import { lttb } from "../../lib/downsample";
-import { UPlotChart, type UPlotChartHandle } from "../UPlotChart";
+import { UPlotChart, syncPlotCursorToX } from "../UPlotChart";
 import type { ParsedStrategy } from "../../types";
 
 export function PositionChartPanel() {
@@ -12,7 +13,7 @@ export function PositionChartPanel() {
   const selectedProduct = useStore((s) => s.selectedProduct);
   const tickIdx = useStore((s) => s.tickIdx);
   const sampled = useStore((s) => s.prefs.showSampled);
-  const handleRef = useRef<UPlotChartHandle>(null);
+  const handleRef = useRef<uPlot | null>(null);
 
   const ref = strategies.find((s) => s.id === refId) ?? null;
   const product = selectedProduct ?? ref?.products[0] ?? null;
@@ -103,12 +104,12 @@ export function PositionChartPanel() {
 
   useEffect(() => {
     if (!ref) return;
-    handleRef.current?.syncCursorToX(ref.timestamps[tickIdx] ?? 0);
+    syncPlotCursorToX(handleRef.current, ref.timestamps[tickIdx] ?? 0);
   }, [tickIdx, ref]);
 
   // Redraw when the user changes the limit (band is drawn from limitRef).
   useEffect(() => {
-    handleRef.current?.getPlot()?.redraw();
+    handleRef.current?.redraw();
   }, [limit]);
 
   const setLimit = useStore((s) => s.setPositionLimit);
@@ -132,7 +133,7 @@ export function PositionChartPanel() {
         )}
       </div>
       <div className="flex-1">
-        <UPlotChart ref={handleRef} data={data} options={options} />
+        <UPlotChart plotRef={handleRef} data={data} options={options} />
       </div>
     </div>
   );

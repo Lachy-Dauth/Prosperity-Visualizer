@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef } from "react";
+import type uPlot from "uplot";
 import type { AlignedData, Options } from "uplot";
 import { useStore, getReferenceStrategy } from "../../lib/store";
 import { lttb } from "../../lib/downsample";
-import { UPlotChart, type UPlotChartHandle } from "../UPlotChart";
+import { UPlotChart, syncPlotCursorToX } from "../UPlotChart";
 
 export function PriceChartPanel() {
   const ref = useStore(getReferenceStrategy);
   const tickIdx = useStore((s) => s.tickIdx);
   const selectedProduct = useStore((s) => s.selectedProduct);
   const sampled = useStore((s) => s.prefs.showSampled);
-  const handleRef = useRef<UPlotChartHandle>(null);
+  const handleRef = useRef<uPlot | null>(null);
 
   const product = selectedProduct ?? ref?.products[0] ?? null;
 
@@ -61,7 +62,7 @@ export function PriceChartPanel() {
 
   useEffect(() => {
     if (!ref) return;
-    handleRef.current?.syncCursorToX(ref.timestamps[tickIdx] ?? 0);
+    syncPlotCursorToX(handleRef.current, ref.timestamps[tickIdx] ?? 0);
   }, [tickIdx, ref]);
 
   return (
@@ -70,7 +71,7 @@ export function PriceChartPanel() {
         <span>Price &amp; Liquidity {product ? `· ${product}` : ""}</span>
       </div>
       <div className="flex-1">
-        <UPlotChart ref={handleRef} data={data} options={options} />
+        <UPlotChart plotRef={handleRef} data={data} options={options} />
       </div>
     </div>
   );

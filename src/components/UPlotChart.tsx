@@ -1,84 +1,59 @@
-import { useEffect, useImperativeHandle, useRef, forwardRef } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
 import uPlot, { type AlignedData, type Options } from "uplot";
-
-export interface UPlotChartHandle {
-  /** access the underlying uPlot instance */
-  getPlot(): uPlot | null;
-  /** programmatically move the crosshair to a given x value */
-  syncCursorToX(x: number): void;
-}
 
 interface Props {
   data: AlignedData;
   options: Options;
+  /**
+   * Stable ref container that receives the current uPlot instance. Must be
+   * the SAME ref across renders — don't inline `(u) => ...` or the chart will
+   * rebuild on every render.
+   */
+  plotRef?: MutableRefObject<uPlot | null>;
 }
 
 /**
- * Light wrapper around uPlot.
+ * Thin wrapper around uPlot.
  *
- * Stability rules (these matter — react-grid-layout plus our store update
- * torrent can trigger 60+ renders/sec):
- * - The chart instance is built ONCE on mount.
- * - Data updates use `setData` (no teardown).
- * - Options updates try an in-place stroke/label diff and only rebuild
- *   when the series count or labels actually change.
- * - The ResizeObserver callback is debounced inside a RAF frame to avoid
- *   "ResizeObserver loop limit exceeded" feedback with our grid layout.
+ * Contract (hard-earned):
+ * - Mount creates a uPlot instance once.
+ * - `data` updates use setData().
+ * - `options` updates rebuild the instance in place (uPlot has no
+ *   setSeries/setScales — this is the simplest correct behavior).
+ * - Parents must pass a stable `plotRef` (useRef) so this component's
+ *   effects don't re-run every render.
  */
-export const UPlotChart = forwardRef<UPlotChartHandle, Props>(function UPlotChart(
-  { data, options },
-  ref
-) {
+export function UPlotChart({ data, options, plotRef }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const plotRef = useRef<uPlot | null>(null);
-  const optsRef = useRef<Options>(options);
-  const dataRef = useRef<AlignedData>(data);
-  optsRef.current = options;
-  dataRef.current = data;
+  const innerPlotRef = useRef<uPlot | null>(null);
+  // Mirror into parent's ref if provided
+  if (plotRef && plotRef.current !== innerPlotRef.current) {
+    plotRef.current = innerPlotRef.current;
+  }
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      getPlot: () => plotRef.current,
-      syncCursorToX: (x: number) => {
-        const u = plotRef.current;
-        if (!u) return;
-        const xs = u.data[0] as number[];
-        if (!xs || xs.length === 0) return;
-        let lo = 0;
-        let hi = xs.length - 1;
-        while (lo < hi) {
-          const mid = (lo + hi) >>> 1;
-          if (xs[mid] < x) lo = mid + 1;
-          else hi = mid;
-        }
-        const left = u.valToPos(xs[lo], "x");
-        if (Number.isFinite(left)) {
-          u.setCursor({ left, top: 0 });
-        }
-      },
-    }),
-    []
-  );
-
-  // Build once, tear down on unmount.
+  // Build / rebuild chart when options change.
   useEffect(() => {
-    if (!containerRef.current) return;
     const el = containerRef.current;
-    const opts: Options = {
-      ...optsRef.current,
-      width: el.clientWidth || 400,
-      height: el.clientHeight || 200,
-    };
-    const u = new uPlot(opts, dataRef.current, el);
-    plotRef.current = u;
+    if (!el) return;
+
+    const u = new uPlot(
+      {
+        ...options,
+        width: el.clientWidth || 400,
+        height: el.clientHeight || 200,
+      },
+      data,
+      el
+    );
+    innerPlotRef.current = u;
+    if (plotRef) plotRef.current = u;
 
     let rafId: number | null = null;
     const ro = new ResizeObserver(() => {
       if (rafId != null) return;
       rafId = requestAnimationFrame(() => {
         rafId = null;
-        const p = plotRef.current;
+        const p = innerPlotRef.current;
         if (!p) return;
         const w = el.clientWidth;
         const h = el.clientHeight;
@@ -88,55 +63,42 @@ export const UPlotChart = forwardRef<UPlotChartHandle, Props>(function UPlotChar
       });
     });
     ro.observe(el);
+
     return () => {
       ro.disconnect();
       if (rafId != null) cancelAnimationFrame(rafId);
       u.destroy();
-      plotRef.current = null;
+      if (innerPlotRef.current === u) innerPlotRef.current = null;
+      if (plotRef && plotRef.current === u) plotRef.current = null;
     };
-  }, []);
+    // We intentionally exclude `data` — data updates go through setData below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options]);
 
   // Push new data without rebuilding.
   useEffect(() => {
-    const u = plotRef.current;
+    const u = innerPlotRef.current;
     if (!u) return;
     u.setData(data);
   }, [data]);
 
-  // Diff options in place; rebuild only when we can't.
-  useEffect(() => {
-    const u = plotRef.current;
-    const el = containerRef.current;
-    if (!u || !el) return;
-
-    const needRebuild =
-      u.series.length !== options.series.length ||
-      options.series.some((s, i) => s.label !== u.series[i]?.label);
-
-    if (!needRebuild) {
-      // Update stroke/width/dash in place — no teardown, no flicker.
-      for (let i = 1; i < options.series.length; i++) {
-        const target = options.series[i];
-        const cur = u.series[i];
-        if (!cur) continue;
-        if (target.stroke !== undefined && target.stroke !== cur.stroke) {
-          cur.stroke = target.stroke;
-        }
-        if (target.width !== undefined && target.width !== cur.width) {
-          cur.width = target.width;
-        }
-      }
-      u.redraw();
-      return;
-    }
-
-    u.destroy();
-    plotRef.current = new uPlot(
-      { ...options, width: el.clientWidth, height: el.clientHeight },
-      dataRef.current,
-      el
-    );
-  }, [options]);
-
   return <div ref={containerRef} className="h-full w-full" />;
-});
+}
+
+/** Find the x-array index nearest to `x` and move the chart's crosshair. */
+export function syncPlotCursorToX(u: uPlot | null, x: number) {
+  if (!u) return;
+  const xs = u.data[0] as number[];
+  if (!xs || xs.length === 0) return;
+  let lo = 0;
+  let hi = xs.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (xs[mid] < x) lo = mid + 1;
+    else hi = mid;
+  }
+  const left = u.valToPos(xs[lo], "x");
+  if (Number.isFinite(left)) {
+    u.setCursor({ left, top: 0 });
+  }
+}
