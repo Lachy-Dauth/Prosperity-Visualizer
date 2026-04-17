@@ -8,4 +8,3 @@ dist-ssr
 .env.local
 .env.*.local
 coverage
-*.tsbuildinfo
