@@ -22,15 +22,13 @@ export function PnlChartPanel() {
 
   const { data, options } = useMemo(() => {
     if (!refStrat) {
+      // Chart will not mount without data — see render below.
       const opts: Options = {
         width: 400,
         height: 200,
-        legend: { show: false },
-        scales: { x: { time: false } },
-        series: [{}, { label: "PnL" }],
-        axes: defaultAxes(),
+        series: [{}],
       };
-      return { data: [[], []] as AlignedData, options: opts };
+      return { data: [[]] as AlignedData, options: opts };
     }
 
     const compareList = strategies.filter(
@@ -190,7 +188,13 @@ export function PnlChartPanel() {
         </div>
       </div>
       <div className="relative flex-1">
-        <UPlotChart plotRef={handleRef} data={data} options={options} />
+        {refStrat ? (
+          <UPlotChart plotRef={handleRef} data={data} options={options} />
+        ) : (
+          <div className="flex h-full items-center justify-center text-xs text-zinc-500">
+            Load a log to see PnL.
+          </div>
+        )}
       </div>
     </div>
   );

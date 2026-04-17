@@ -142,7 +142,13 @@ export function PositionChartPanel() {
         )}
       </div>
       <div className="flex-1">
-        <UPlotChart plotRef={handleRef} data={data} options={options} />
+        {ref && product ? (
+          <UPlotChart plotRef={handleRef} data={data} options={options} />
+        ) : (
+          <div className="flex h-full items-center justify-center text-xs text-zinc-500">
+            {ref ? "Select a product." : "Load a log to see positions."}
+          </div>
+        )}
       </div>
     </div>
   );
