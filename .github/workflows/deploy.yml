@@ -10,22 +10,68 @@ permissions:
   pages: write
   id-token: write
 
+# Only one concurrent deploy, and the latest push wins (in-flight
+# deploys for superseded commits are cancelled).
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Pre-deploy sanity: fail fast if a syntax error or bad import
+      # slipped past review.
+      - name: JS syntax
+        run: |
+          set -e
+          mapfile -t files < <(find . -type f -name '*.js' -not -path './.git/*')
+          for f in "${files[@]}"; do
+            node --input-type=module --check < "$f" || { echo "FAIL: $f"; exit 1; }
+          done
+
+      - name: Import graph
+        run: node .github/scripts/check-imports.mjs
+
+      # Stage only what the static site actually needs — keep .git,
+      # workflow files, and contributor docs out of the published
+      # artifact.
+      - name: Stage site
+        run: |
+          set -e
+          mkdir -p _site
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.gitignore' \
+            --exclude='_site' \
+            --exclude='CONTRIBUTING.md' \
+            --exclude='LICENSE' \
+            --exclude='README.md' \
+            ./ _site/
+          # .nojekyll so Pages doesn't try to run Jekyll over our
+          # hyphen/underscore-prefixed module paths.
+          touch _site/.nojekyll
+          echo "Staged files:"; find _site -type f | sort
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
   deploy:
+    needs: build
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-      # Pure HTML/CSS/JS — no build step. Publish the repo as-is.
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: .
       - id: deployment
         uses: actions/deploy-pages@v4

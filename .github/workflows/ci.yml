@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Every committed .js file must parse as an ES module. Catches
+      # unclosed braces, stray keywords, etc. before they hit main.
+      - name: JS syntax
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find . -type f -name '*.js' -not -path './.git/*')
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no .js files found — unexpected" >&2
+            exit 1
+          fi
+          echo "Parsing ${#files[@]} files…"
+          for f in "${files[@]}"; do
+            node --input-type=module --check < "$f" || { echo "FAIL: $f"; exit 1; }
+          done
+
+      # Every import in every module must resolve to an existing file
+      # (relative specifiers only — we have no bare specifiers). Catches
+      # typos and dangling references from refactors.
+      - name: Import graph
+        run: node .github/scripts/check-imports.mjs
+
+      # Guard against accidentally re-introducing a build system. The
+      # whole point of this rewrite is "no npm", so any reappearance of
+      # these files should fail loudly.
+      - name: No-deps guard
+        run: |
+          set -e
+          FORBIDDEN=(package.json package-lock.json tsconfig.json vite.config.ts tailwind.config.js postcss.config.js node_modules)
+          for path in "${FORBIDDEN[@]}"; do
+            if [ -e "$path" ]; then
+              echo "Forbidden path reappeared: $path" >&2
+              echo "If you genuinely need a build system, remove the" >&2
+              echo "'No-deps guard' step explicitly rather than hiding it." >&2
+              exit 1
+            fi
+          done
+          echo "clean."
+
+      # Smoke test: serve the repo with Python's stdlib http server and
+      # confirm the critical paths are reachable. Matches how the site
+      # will be served by GitHub Pages.
+      - name: Smoke serve
+        run: |
+          set -e
+          python3 -m http.server 8080 >/tmp/http.log 2>&1 &
+          SRV=$!
+          trap "kill $SRV 2>/dev/null || true" EXIT
+          sleep 1
+          paths=(
+            index.html
+            app.js
+            styles.css
+            demo.log
+            favicon.svg
+            js/store.js
+            js/parser.js
+            js/worker.js
+            js/chart.js
+            js/panels/rail.js
+            js/panels/pnlChart.js
+            js/panels/priceChart.js
+          )
+          for p in "${paths[@]}"; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8080/$p")
+            if [ "$code" != "200" ]; then
+              echo "FAIL: /$p returned $code" >&2
+              exit 1
+            fi
+            echo "  ok: /$p"
+          done
