@@ -64,6 +64,7 @@ export function mountRail({
           saveStrategy(strat).catch(() => {});
         }
       } catch (e) {
+        console.error(`[rail] Failed to parse ${f.name}:`, e);
         alert(`Failed to parse ${f.name}: ${e.message}`);
       } finally {
         setParseProgress(null);
