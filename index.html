@@ -80,8 +80,8 @@
             <div class="scrubber-wrap">
               <input type="range" class="scrubber" id="scrubber" min="0" max="0" value="0" step="1" disabled />
               <div class="scrubber-label">
-                Tick <span class="fg" id="tick-cur">0</span>/<span class="muted" id="tick-max">0</span>
-                · <span id="tick-dayts">TS 0</span>
+                Tick <input class="inline-num" id="tick-cur" type="number" min="0" value="0" step="1" title="Jump to tick index" disabled />/<span class="muted" id="tick-max">0</span>
+                · <span id="tick-day-prefix"></span>TS <input class="inline-num wide" id="tick-ts" type="number" value="0" step="100" title="Jump to timestamp" disabled />
               </div>
             </div>
             <button class="btn icon" id="theme-toggle" title="Toggle theme">☾</button>

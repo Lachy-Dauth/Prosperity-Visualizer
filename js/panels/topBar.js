@@ -14,7 +14,8 @@ export function mountTopBar({
   scrubberEl,
   tickCurEl,
   tickMaxEl,
-  tickDayTsEl,
+  tickTsEl,
+  tickDayPrefixEl,
   playBtn,
   stepBackBtn,
   stepFwdBtn,
@@ -80,6 +81,55 @@ export function mountTopBar({
     setTickIdx(Number(e.target.value));
   });
 
+  function commitTickInput() {
+    const v = Number(tickCurEl.value);
+    if (Number.isFinite(v)) setTickIdx(v);
+    else tickCurEl.value = String(getState().tickIdx);
+  }
+  tickCurEl.addEventListener("change", commitTickInput);
+  tickCurEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitTickInput();
+      tickCurEl.blur();
+    }
+  });
+
+  function commitTsInput() {
+    const v = Number(tickTsEl.value);
+    const ref = getReference(getState());
+    if (!ref || !Number.isFinite(v)) {
+      tickTsEl.value = String(ref?.rawTimestamps?.[getState().tickIdx] ?? 0);
+      return;
+    }
+    // Prefer a match on the current day; fall back to the nearest TS overall.
+    const curDay = ref.days?.[getState().tickIdx];
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    let bestDayIdx = -1;
+    let bestDayDist = Infinity;
+    for (let i = 0; i < ref.rawTimestamps.length; i++) {
+      const d = Math.abs(ref.rawTimestamps[i] - v);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+      if (ref.days?.[i] === curDay && d < bestDayDist) {
+        bestDayDist = d;
+        bestDayIdx = i;
+      }
+    }
+    setTickIdx(bestDayIdx >= 0 ? bestDayIdx : bestIdx);
+  }
+  tickTsEl.addEventListener("change", commitTsInput);
+  tickTsEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitTsInput();
+      tickTsEl.blur();
+    }
+  });
+
   playBtn.addEventListener("click", () => {
     setIsPlaying(!getState().isPlaying);
   });
@@ -134,17 +184,23 @@ export function mountTopBar({
     scrubberEl.disabled = !ref;
     scrubberEl.value = String(state.tickIdx);
 
-    tickCurEl.textContent = String(state.tickIdx);
+    tickCurEl.max = String(max);
+    tickCurEl.disabled = !ref;
+    if (document.activeElement !== tickCurEl) {
+      tickCurEl.value = String(state.tickIdx);
+    }
     tickMaxEl.textContent = String(max);
     const ts =
       ref?.rawTimestamps?.[state.tickIdx] ??
       ref?.timestamps?.[state.tickIdx] ??
       0;
     const day = ref?.days?.[state.tickIdx];
-    tickDayTsEl.textContent =
-      hasMultipleDays && day !== undefined
-        ? `D${day} TS ${ts.toLocaleString()}`
-        : `TS ${ts.toLocaleString()}`;
+    tickTsEl.disabled = !ref;
+    if (document.activeElement !== tickTsEl) {
+      tickTsEl.value = String(ts);
+    }
+    tickDayPrefixEl.textContent =
+      hasMultipleDays && day !== undefined ? `D${day} ` : "";
 
     // Play button
     playBtn.disabled = !ref;

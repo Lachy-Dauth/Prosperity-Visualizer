@@ -439,6 +439,34 @@ a {
   color: var(--c-text-dim);
   white-space: nowrap;
 }
+.inline-num {
+  width: 5ch;
+  padding: 1px 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-text);
+  background: var(--c-panel-2);
+  border: 1px solid var(--c-border);
+  border-radius: 3px;
+  text-align: right;
+  -moz-appearance: textfield;
+}
+.inline-num.wide {
+  width: 9ch;
+}
+.inline-num:focus {
+  outline: 1px solid var(--c-accent);
+  outline-offset: 0;
+}
+.inline-num:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.inline-num::-webkit-outer-spin-button,
+.inline-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
 
 .status-pill {
   display: inline-flex;
